@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { API_ENDPOINTS } from '../config';
 import { MaterialIcons, MaterialCommunityIcons, FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path, Polyline, Defs, LinearGradient, Stop } from 'react-native-svg';
@@ -20,7 +21,7 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('http://10.121.7.118:5000/latest');
+        const response = await fetch(API_ENDPOINTS.LATEST);
         const json = await response.json();
 
         setData(prev => {

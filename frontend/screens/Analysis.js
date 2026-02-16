@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { API_ENDPOINTS } from '../config';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,7 +19,7 @@ export default function Analysis({ navigation }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('http://10.115.15.118:5000/latest');
+        const response = await fetch(API_ENDPOINTS.LATEST);
         const json = await response.json();
 
         setData(prev => {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { API_ENDPOINTS } from '../config';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
 
@@ -20,7 +21,7 @@ export default function DeviceControl() {
 
   const setDeviceDisplayMode = async (mode) => {
     try {
-      await fetch('http://10.121.7.118:5000/display-mode', {
+      await fetch(API_ENDPOINTS.DISPLAY_MODE, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -35,7 +36,7 @@ export default function DeviceControl() {
 
   const setSensorControl = async (active) => {
     try {
-      await fetch('http://10.121.7.118:5000/sensor-control', {
+      await fetch(API_ENDPOINTS.SENSOR_CONTROL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -50,7 +51,7 @@ export default function DeviceControl() {
 
   const updateServerInterval = async (interval) => {
     try {
-      await fetch('http://10.121.7.118:5000/set-interval', {
+      await fetch(API_ENDPOINTS.SET_INTERVAL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -66,7 +67,7 @@ export default function DeviceControl() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('http://10.121.7.118:5000/latest');
+        const response = await fetch(API_ENDPOINTS.LATEST);
         const json = await response.json();
 
         setData(prev => {
