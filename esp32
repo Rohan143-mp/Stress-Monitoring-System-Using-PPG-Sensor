@@ -12,10 +12,10 @@ const char* ssid = "Rohan";
 const char* password = "Rohan123";
 
 // Toggle between LOCAL and CLOUD
-#define USE_CLOUD false 
+#define USE_CLOUD true 
 
 String localURL = "http://10.121.7.118:5000/predict";
-String cloudURL = "https://stress-monitoring-api-v1.onrender.com/predict"; // UPDATE THIS
+String cloudURL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com/predict";
 
 String serverURL = USE_CLOUD ? cloudURL : localURL;
 

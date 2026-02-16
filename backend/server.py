@@ -34,7 +34,7 @@ latest_reading = {
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    global latest_reading, current_display_mode
+    global latest_reading, current_display_mode, recalibrate_flag
     data = request.json
 
     bpm = data.get("bpm", 0)
