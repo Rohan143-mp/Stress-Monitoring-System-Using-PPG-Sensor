@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Stress Monitoring System",
+    "slug": "stress-monitoring-system",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.rohan.stressmonitoring"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "81204910-b52f-4b1d-83b4-7fea6a21940d"
+      }
+    }
+  }
+}
