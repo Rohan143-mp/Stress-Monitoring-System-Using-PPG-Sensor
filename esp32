@@ -102,13 +102,14 @@ void connectWiFi() {
 void sendToServer() {
   if (WiFi.status() != WL_CONNECTED) return;
 
+  WiFiClientSecure *client = nullptr;
   HTTPClient http;
-  
-  // Handle HTTPS for Render
+  http.setTimeout(25000); // 25s for Render
+
   if (serverURL.startsWith("https")) {
-    WiFiClientSecure client;
-    client.setInsecure(); // Skip SSL certificate validation
-    http.begin(client, serverURL);
+    client = new WiFiClientSecure;
+    client->setInsecure();
+    http.begin(*client, serverURL);
   } else {
     http.begin(serverURL);
   }
@@ -158,10 +159,13 @@ void sendToServer() {
     }
   } else {
     lastError = http.errorToString(code);
-    Serial.print("HTTP Error: ");
-    Serial.println(lastError);
+    Serial.print("HTTP Error: "); Serial.println(lastError);
   }
+  
   http.end();
+  if (client) {
+    delete client; // Free heap memory
+  }
 }
 
 void calculateHRV(long rr) {
@@ -306,8 +310,8 @@ void loop() {
   sensor.check(); 
   readSensor();
 
-  // Recovery: If sensor output is frozen/zero for 5 seconds, restart it
-  if (millis() - lastSensorCheck > 5000) {
+  // Recovery: Increased to 20s to allow for slow Cloud HTTP calls
+  if (millis() - lastSensorCheck > 20000) {
     Serial.println("Re-initializing sensor...");
     setupSensor();
     lastSensorCheck = millis();
