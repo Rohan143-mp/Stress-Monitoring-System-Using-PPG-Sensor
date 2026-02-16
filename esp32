@@ -152,17 +152,24 @@ void sendToServer() {
 
 void calculateHRV(long rr) {
   if (rr < 400 || rr > 1500) return; 
+
   if (prevRR > 0) {
     long diff = abs(rr - prevRR);
-    if (diff < 250) { 
+    Serial.print("RR Diff: "); Serial.println(diff);
+
+    if (diff < 300) { // Loosened to 300ms for noisy signals
       rrDiffSq[hrvIndex++] = diff * diff;
       if (hrvIndex >= HRV_SIZE) { hrvIndex = 0; hrvReady = true; }
+      
       int count = hrvReady ? HRV_SIZE : hrvIndex;
       if (count >= 2) {
-        long sum = 0;
+        float sum = 0; // Use float for sum to ensure precise division
         for (int i = 0; i < count; i++) sum += rrDiffSq[i];
         hrv = sqrt(sum / count);
+        Serial.print("HRV Updated: "); Serial.println(hrv);
       }
+    } else {
+      Serial.println("Diff out of range (>300)");
     }
   }
   prevRR = rr;
