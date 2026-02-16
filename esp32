@@ -12,7 +12,7 @@ const char* ssid = "Rohan";
 const char* password = "Rohan123";
 
 // Toggle between LOCAL and CLOUD
-#define USE_CLOUD true 
+#define USE_CLOUD false 
 
 String localURL = "http://10.121.7.118:5000/predict";
 String cloudURL = "https://stress-monitoring-api-v1.onrender.com/predict"; // UPDATE THIS
@@ -65,7 +65,7 @@ void setupSensor() {
   // Increased ledBrightness to 100 for better skin penetration
   // sampleAverage 4, ledMode 2 (Red+IR), sampleRate 100, pulseWidth 411, adcRange 4096
   sensor.setup(100, 4, 2, 100, 411, 4096); 
-  sensor.setPulseAmplitudeRed(0x0A); // Low Red LED to save power, mostly use IR
+  sensor.setPulseAmplitudeRed(0x1F); // Increased Red LED for better visibility
   sensor.setPulseAmplitudeIR(0x32);  // High IR LED for better heart signal
 }
 
@@ -129,15 +129,23 @@ void sendToServer() {
   String body;
   serializeJson(doc, body);
 
+  Serial.print("Sending to: "); Serial.println(serverURL);
   int code = http.POST(body);
+  
   if (code > 0) {
     String payload = http.getString();
+    Serial.print("HTTP Code: "); Serial.println(code);
+    Serial.println("Response: " + payload);
+    
     StaticJsonDocument<512> recvDoc;
     if (!deserializeJson(recvDoc, payload)) {
       if (recvDoc.containsKey("stress")) stressLevel = recvDoc["stress"].as<String>();
       if (recvDoc.containsKey("warning")) warningMsg = recvDoc["warning"].as<String>();
       if (recvDoc.containsKey("send_interval")) sendInterval = recvDoc["send_interval"].as<int>();
     }
+  } else {
+    Serial.print("HTTP Error: ");
+    Serial.println(http.errorToString(code).c_str());
   }
   http.end();
 }
@@ -162,10 +170,9 @@ void calculateHRV(long rr) {
 
 void readSensor() {
   long irValue = sensor.getIR();
-  
-  // Debug: Serial.println(irValue); // Uncomment if troubleshooting raw signal
+  Serial.print("IR: "); Serial.println(irValue);
 
-  if (irValue < 10000) { // Very low threshold
+  if (irValue < 5000) { // Lowered threshold for weak signals
     fingerDetected = false;
     return;
   }

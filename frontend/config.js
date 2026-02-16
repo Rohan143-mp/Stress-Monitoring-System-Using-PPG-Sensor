@@ -1,7 +1,7 @@
 // Centralized configuration for the API URL
 // Toggle between LOCAL and CLOUD mode
 
-const USE_CLOUD = true;
+const USE_CLOUD = false;
 
 const LOCAL_IP = "10.121.7.118";
 const RENDER_URL = "https://stress-monitoring-api-v1.onrender.com"; // UPDATE THIS to your public Render URL
