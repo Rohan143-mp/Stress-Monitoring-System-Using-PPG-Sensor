@@ -14,4 +14,5 @@ export const API_ENDPOINTS = {
     SET_INTERVAL: `${API_BASE_URL}/set-interval`,
     DISPLAY_MODE: `${API_BASE_URL}/display-mode`,
     SENSOR_CONTROL: `${API_BASE_URL}/sensor-control`,
+    RECALIBRATE: `${API_BASE_URL}/recalibrate`,
 };

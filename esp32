@@ -32,6 +32,8 @@ float bpm = 0;
 float hrv = 0;
 String stressLevel = "IDLE";
 String warningMsg = "";
+String currentDisplayMode = "STRESS";
+bool isSensorActive = true;
 
 long lastBeatTime = 0;
 long prevRR = 0;
@@ -142,6 +144,15 @@ void sendToServer() {
       if (recvDoc.containsKey("stress")) stressLevel = recvDoc["stress"].as<String>();
       if (recvDoc.containsKey("warning")) warningMsg = recvDoc["warning"].as<String>();
       if (recvDoc.containsKey("send_interval")) sendInterval = recvDoc["send_interval"].as<int>();
+      if (recvDoc.containsKey("display_mode")) currentDisplayMode = recvDoc["display_mode"].as<String>();
+      if (recvDoc.containsKey("is_sensor_active")) isSensorActive = recvDoc["is_sensor_active"].as<bool>();
+      
+      if (recvDoc["recalibrate"] == true) {
+        Serial.println("Recalibrating...");
+        bpmReady = false; bpmIndex = 0; hrvReady = false; hrvIndex = 0;
+        bpm = 0; hrv = 0;
+        setupSensor();
+      }
     }
   } else {
     Serial.print("HTTP Error: ");
@@ -176,6 +187,11 @@ void calculateHRV(long rr) {
 }
 
 void readSensor() {
+  if (!isSensorActive) {
+    fingerDetected = false;
+    bpm = 0; hrv = 0;
+    return;
+  }
   long irValue = sensor.getIR();
   Serial.print("IR: "); Serial.println(irValue);
 
@@ -208,28 +224,58 @@ void readSensor() {
 void updateDisplay() {
   display.clearDisplay();
   display.setTextColor(WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("STRESS MONITOR");
-  display.drawLine(0, 9, 128, 9, WHITE);
+  
+  if (currentDisplayMode == "STRESS") {
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("STRESS MONITOR");
+    display.drawLine(0, 9, 128, 9, WHITE);
+    display.setCursor(100, 0);
+    if (fingerDetected) display.print("LIVE"); else display.print("HOLD");
 
-  display.setCursor(100, 0);
-  if (fingerDetected) display.print("LIVE");
-  else display.print("HOLD");
+    display.setCursor(0, 15);
+    display.print("BPM: "); display.setTextSize(2); display.print((int)bpm);
+    display.setTextSize(1); display.print("   HRV: "); display.setTextSize(2); display.println((int)hrv);
+    display.setTextSize(1);
+    display.setCursor(0, 38);
+    display.print("STRESS: "); display.setTextSize(2); display.println(stressLevel);
+  } 
+  else if (currentDisplayMode == "BPM") {
+    display.setCursor(0, 0);
+    display.println("HEART RATE");
+    display.drawLine(0, 9, 128, 9, WHITE);
+    display.setCursor(0, 20);
+    display.setTextSize(4);
+    display.print((int)bpm);
+    display.setTextSize(2);
+    display.print(" BPM");
+  }
+  else if (currentDisplayMode == "SPO2") {
+    display.setCursor(0, 0);
+    display.println("SPO2 & RESP");
+    display.drawLine(0, 9, 128, 9, WHITE);
+    display.setCursor(0, 20);
+    display.setTextSize(2);
+    display.print("SPO2: "); display.setTextSize(3); display.print("98%");
+    display.setCursor(0, 45);
+    display.setTextSize(2);
+    display.print("RESP: "); display.setTextSize(3); display.print("16");
+  }
+  else if (currentDisplayMode == "IDLE") {
+    display.setCursor(20, 25);
+    display.setTextSize(2);
+    display.println("SYSTEM IDLE");
+  }
 
-  display.setCursor(0, 15);
-  display.print("BPM: "); display.setTextSize(2); display.print((int)bpm);
-  display.setTextSize(1); display.print("   HRV: "); display.setTextSize(2); display.println((int)hrv);
-
-  display.setTextSize(1);
-  display.setCursor(0, 38);
-  display.print("STRESS: "); display.setTextSize(2); display.println(stressLevel);
-
+  // Footer / Timer (Always show small at the bottom)
   int timeLeft = (int)(sendInterval - (millis() - lastSendTime)) / 1000;
   if (timeLeft < 0) timeLeft = 0;
   display.setTextSize(1);
   display.setCursor(0, 56);
-  display.print("Sync in: "); display.print(timeLeft); display.print("s");
+  if (!isSensorActive) display.print("MONITORING PAUSED");
+  else {
+    display.print("Sync in: "); display.print(timeLeft); display.print("s");
+  }
   display.display();
 }
 

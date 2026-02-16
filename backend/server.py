@@ -16,6 +16,7 @@ label_encoder = joblib.load("models/label_encoder.pkl")
 current_display_mode = "STRESS"
 is_sensor_active = True
 send_interval = 10000  # Default 10 seconds
+recalibrate_flag = False
 
 # Initial state: last_updated is 0 (never connected)
 latest_reading = {
@@ -53,8 +54,10 @@ def predict():
             "display_mode": current_display_mode,
             "is_sensor_active": is_sensor_active,
             "send_interval": send_interval,
+            "recalibrate": recalibrate_flag,
             "last_updated": time.time()
         }
+        recalibrate_flag = False # Reset after sending to device
         return jsonify(latest_reading)
 
     # Sanity check for realistic biometric data
@@ -69,9 +72,11 @@ def predict():
             "display_mode": current_display_mode,
             "is_sensor_active": is_sensor_active,
             "send_interval": send_interval,
+            "recalibrate": recalibrate_flag,
             "last_updated": time.time(),
             "server_now": time.time()
         }
+        recalibrate_flag = False # Reset after sending to device
         return jsonify(latest_reading)
 
     # Final safety cap for HRV (RMSSD) based on user-provided unrealistic thresholds
@@ -113,8 +118,10 @@ def predict():
         "display_mode": current_display_mode,
         "is_sensor_active": is_sensor_active,
         "send_interval": send_interval,
+        "recalibrate": recalibrate_flag,
         "last_updated": time.time()  # Current server time
     }
+    recalibrate_flag = False # Reset after sending to device
 
     return jsonify(latest_reading)
 
@@ -149,6 +156,12 @@ def set_display_mode():
         # Update latest_reading immediately so /latest also reflects it
         latest_reading["display_mode"] = current_display_mode
     return jsonify({"status": "success", "mode": current_display_mode})
+
+@app.route("/recalibrate", methods=["POST"])
+def recalibrate():
+    global recalibrate_flag
+    recalibrate_flag = True
+    return jsonify({"status": "success", "message": "Recalibration triggered"})
 
 @app.route("/latest", methods=["GET"])
 def get_latest():

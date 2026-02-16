@@ -64,6 +64,17 @@ export default function DeviceControl() {
     }
   };
 
+  const recalibrateSensors = async () => {
+    try {
+      await fetch(API_ENDPOINTS.RECALIBRATE, {
+        method: 'POST',
+      });
+      alert("Recalibration command sent to device!");
+    } catch (error) {
+      console.error("Error recalibrating:", error);
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -279,7 +290,7 @@ export default function DeviceControl() {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity style={styles.actionButton} onPress={recalibrateSensors}>
           <View style={styles.actionIcon}>
             <MaterialIcons name="refresh" size={24} color="#102216" />
           </View>
