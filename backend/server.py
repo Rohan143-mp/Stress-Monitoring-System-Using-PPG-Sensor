@@ -9,10 +9,17 @@ import time
 app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
 
-rf_model = joblib.load("models/rf_model.pkl")
-xgb_model = joblib.load("models/xgb_model.pkl")
-scaler = joblib.load("models/scaler.pkl")
-label_encoder = joblib.load("models/label_encoder.pkl")
+# Robust path handling for loading models on Render/Cloud
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_model_path(filename):
+    return os.path.join(BASE_DIR, "models", filename)
+
+rf_model = joblib.load(get_model_path("rf_model.pkl"))
+xgb_model = joblib.load(get_model_path("xgb_model.pkl"))
+scaler = joblib.load(get_model_path("scaler.pkl"))
+label_encoder = joblib.load(get_model_path("label_encoder.pkl"))
+
 current_display_mode = "STRESS"
 is_sensor_active = True
 send_interval = 10000  # Default 10 seconds
@@ -140,6 +147,7 @@ def set_sensor_control():
     data = request.json
     if "active" in data:
         is_sensor_active = bool(data["active"])
+        print(f"Sensor Control Update: is_sensor_active set to {is_sensor_active}")
         latest_reading["is_sensor_active"] = is_sensor_active
         # Optionally, we could also reset sensor data if stopping
         if not is_sensor_active:

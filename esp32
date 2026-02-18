@@ -64,6 +64,12 @@ unsigned long sendInterval = 10000;
 void setupSensor() {
   if (!sensor.begin(Wire, I2C_SPEED_FAST)) {
     Serial.println("MAX30105 NOT FOUND");
+    display.clearDisplay();
+    display.setCursor(0, 10);
+    display.setTextSize(1);
+    display.println("SENSOR ERROR!");
+    display.println("Check Wires/VCC");
+    display.display();
     return;
   }
   // Increased ledBrightness to 100 for better skin penetration
@@ -194,11 +200,7 @@ void calculateHRV(long rr) {
 }
 
 void readSensor() {
-  if (!isSensorActive) {
-    fingerDetected = false;
-    bpm = 0; hrv = 0;
-    return;
-  }
+  // Always sample - do not stop based on server flag to prevent "turned off" state
   long irValue = sensor.getIR();
   Serial.print("IR: "); Serial.println(irValue);
 
@@ -208,7 +210,6 @@ void readSensor() {
   }
 
   fingerDetected = true;
-  lastSensorCheck = millis(); // Reset recovery timer
 
   if (checkForBeat(irValue)) {
     long currentTime = millis();
@@ -284,8 +285,7 @@ void updateDisplay() {
   if (timeLeft < 0) timeLeft = 0;
   display.setTextSize(1);
   display.setCursor(0, 56);
-  if (!isSensorActive) display.print("MONITORING PAUSED");
-  else if (lastHttpCode != 200 && lastHttpCode != 0) {
+  if (lastHttpCode != 200 && lastHttpCode != 0) {
     display.print("Net Err: "); display.print(lastHttpCode);
   }
   else {
@@ -310,11 +310,16 @@ void loop() {
   sensor.check(); 
   readSensor();
 
-  // Recovery: Increased to 20s to allow for slow Cloud HTTP calls
-  if (millis() - lastSensorCheck > 20000) {
-    Serial.println("Re-initializing sensor...");
-    setupSensor();
-    lastSensorCheck = millis();
+  // Recovery: Only re-init if the IR value is logically impossible or sensor hangs
+  // Reset lastSensorCheck in the loop to prevent timeout during normal operation
+  if (sensor.getIR() < 100) { // Sensor either dead or disconnected
+      if (millis() - lastSensorCheck > 15000) { 
+        Serial.println("Re-initializing sensor...");
+        setupSensor();
+        lastSensorCheck = millis();
+      }
+  } else {
+      lastSensorCheck = millis(); // Sensor is alive (even if no finger)
   }
 
   if (millis() - lastSendTime > sendInterval) {
