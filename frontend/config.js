@@ -1,7 +1,7 @@
 // Centralized configuration for the API URL
 // Toggle between LOCAL and CLOUD mode
 
-const USE_CLOUD = false;
+const USE_CLOUD = true;
 
 const LOCAL_IP = "10.28.194.118";
 const RENDER_URL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com";
