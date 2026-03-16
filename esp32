@@ -12,9 +12,9 @@ const char* ssid = "Rohan";
 const char* password = "Rohan123";
 
 // Toggle between LOCAL and CLOUD
-#define USE_CLOUD true 
+#define USE_CLOUD false 
 
-String localURL = "http://10.121.7.118:5000/predict";
+String localURL = "http://10.28.194.118:5000/predict";
 String cloudURL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com/predict";
 
 String serverURL = USE_CLOUD ? cloudURL : localURL;
@@ -41,6 +41,7 @@ long lastBeatTime = 0;
 long prevRR = 0;
 bool fingerDetected = false;
 long lastSensorCheck = 0;
+bool sensorError = false;
 
 //////////////// BPM AVERAGING //////////////////
 #define RATE_SIZE 10
@@ -64,14 +65,10 @@ unsigned long sendInterval = 10000;
 void setupSensor() {
   if (!sensor.begin(Wire, I2C_SPEED_FAST)) {
     Serial.println("MAX30105 NOT FOUND");
-    display.clearDisplay();
-    display.setCursor(0, 10);
-    display.setTextSize(1);
-    display.println("SENSOR ERROR!");
-    display.println("Check Wires/VCC");
-    display.display();
+    sensorError = true;
     return;
   }
+  sensorError = false;
   // Increased ledBrightness to 100 for better skin penetration
   // sampleAverage 4, ledMode 2 (Red+IR), sampleRate 100, pulseWidth 411, adcRange 4096
   sensor.setup(100, 4, 2, 100, 411, 4096); 
@@ -232,6 +229,15 @@ void readSensor() {
 void updateDisplay() {
   display.clearDisplay();
   display.setTextColor(WHITE);
+
+  if (sensorError) {
+    display.setCursor(0, 10);
+    display.setTextSize(1);
+    display.println("SENSOR ERROR!");
+    display.println("Check Wires/VCC");
+    display.display();
+    return;
+  }
   
   if (currentDisplayMode == "STRESS") {
     display.setTextSize(1);
@@ -315,11 +321,12 @@ void loop() {
   if (sensor.getIR() < 100) { // Sensor either dead or disconnected
       if (millis() - lastSensorCheck > 15000) { 
         Serial.println("Re-initializing sensor...");
-        setupSensor();
+        setupSensor(); // This will set sensorError = true if it fails
         lastSensorCheck = millis();
       }
   } else {
       lastSensorCheck = millis(); // Sensor is alive (even if no finger)
+      sensorError = false;        // Clear error if we have signal
   }
 
   if (millis() - lastSendTime > sendInterval) {

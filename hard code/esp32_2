@@ -1,0 +1,385 @@
+/*
+ * ESP32 + AD8232 ECG Sensor + SSD1306 OLED Display
+ * --------------------------------------------------
+ * Reads ECG signal from AD8232, filters noise using
+ * moving average + bandpass filter, and displays a
+ * scrolling waveform on the 128x64 OLED.
+ *
+ * Wiring:
+ *   AD8232 OUTPUT -> GPIO 34 (ADC)
+ *   AD8232 LO+    -> GPIO 32
+ *   AD8232 LO-    -> GPIO 33
+ *   AD8232 3.3V   -> 3.3V
+ *   AD8232 GND    -> GND
+ *
+ *   OLED SDA -> GPIO 21
+ *   OLED SCL -> GPIO 22
+ *   OLED VCC -> 3.3V
+ *   OLED GND -> GND
+ */
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+//////////////// OLED CONFIG //////////////////
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//////////////// ECG SENSOR PINS //////////////
+#define ECG_PIN   34   // AD8232 analog output
+#define LO_PLUS   32   // Leads-off detection +
+#define LO_MINUS  33   // Leads-off detection -
+
+//////////////// WAVEFORM BUFFER //////////////
+#define WAVE_WIDTH  128          // pixels for waveform (full screen width)
+#define WAVE_TOP    14           // top Y for waveform area (below header)
+#define WAVE_BOTTOM 62           // bottom Y for waveform area
+#define WAVE_HEIGHT (WAVE_BOTTOM - WAVE_TOP)
+
+int waveBuffer[WAVE_WIDTH];      // stores mapped Y positions
+int waveIndex = 0;
+bool bufferFull = false;
+
+//////////////// FILTER SETTINGS //////////////
+
+// --- Moving Average Filter ---
+#define MA_SIZE 5
+int maBuffer[MA_SIZE];
+int maIndex = 0;
+long maSum = 0;
+bool maReady = false;
+
+// --- IIR Bandpass Filter (0.5Hz - 40Hz approx) ---
+// High-pass to remove baseline wander, low-pass to remove high-freq noise
+float hpAlpha = 0.95;   // high-pass coefficient (~0.5Hz cutoff)
+float lpAlpha = 0.15;   // low-pass coefficient (~40Hz cutoff)
+
+float hpPrev = 0;
+float hpOutput = 0;
+float lpOutput = 0;
+float prevRaw = 0;
+
+// --- Notch Filter (50Hz) ---
+// Simple IIR notch to remove powerline interference
+float notch_b0 = 0.9;
+float notch_a1 = -1.6180;  // tuned for ~50Hz at 200Hz sample rate
+float notch_a2 = 0.81;
+float notchX1 = 0, notchX2 = 0;
+float notchY1 = 0, notchY2 = 0;
+
+//////////////// TIMING ///////////////////////
+unsigned long lastSampleTime = 0;
+#define SAMPLE_INTERVAL 5        // 5ms = 200 Hz sample rate
+unsigned long lastDisplayTime = 0;
+#define DISPLAY_INTERVAL 33      // ~30 FPS display refresh
+
+//////////////// HEART RATE ///////////////////
+int bpm = 0;
+unsigned long lastPeakTime = 0;
+float peakThreshold = 0;
+float peakAdaptive = 2048;
+bool peakDetected = false;
+int peakCooldown = 0;
+
+#define BPM_BUFFER_SIZE 5
+int bpmBuffer[BPM_BUFFER_SIZE];
+int bpmIdx = 0;
+bool bpmReady = false;
+
+//////////////// SIGNAL STATS /////////////////
+float signalMin = 4095;
+float signalMax = 0;
+float baselineEst = 2048;
+
+//////////////////////////////////////////////////////
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(21, 22);
+  Wire.setClock(400000);
+
+  // ECG sensor pins
+  pinMode(ECG_PIN, INPUT);
+  pinMode(LO_PLUS, INPUT);
+  pinMode(LO_MINUS, INPUT);
+
+  Serial.println("=============================");
+  Serial.println("  ECG Monitor Starting...");
+  Serial.println("=============================");
+
+  // Initialize OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED FAILED! Check wiring.");
+    while (1) { delay(1000); }
+  }
+
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(20, 10);
+  display.println("ECG Monitor");
+  display.setCursor(20, 25);
+  display.println("Initializing...");
+  display.setCursor(10, 45);
+  display.println("Attach electrodes");
+  display.display();
+  delay(2000);
+
+  // Initialize waveform buffer to center
+  int centerY = WAVE_TOP + WAVE_HEIGHT / 2;
+  for (int i = 0; i < WAVE_WIDTH; i++) {
+    waveBuffer[i] = centerY;
+  }
+
+  // Initialize MA buffer
+  for (int i = 0; i < MA_SIZE; i++) maBuffer[i] = 0;
+
+  Serial.println("Setup complete. Reading ECG...\n");
+}
+
+//////////////////////////////////////////////////////
+// FILTERING FUNCTIONS
+//////////////////////////////////////////////////////
+
+// Moving average for smoothing
+float movingAverage(float input) {
+  maSum -= maBuffer[maIndex];
+  maBuffer[maIndex] = (int)input;
+  maSum += (int)input;
+  maIndex = (maIndex + 1) % MA_SIZE;
+  if (!maReady && maIndex == 0) maReady = true;
+  return (float)maSum / MA_SIZE;
+}
+
+// IIR High-pass filter (removes baseline wander)
+float highPassFilter(float input) {
+  hpOutput = hpAlpha * (hpOutput + input - prevRaw);
+  prevRaw = input;
+  return hpOutput;
+}
+
+// IIR Low-pass filter (removes high-frequency noise)
+float lowPassFilter(float input) {
+  lpOutput = lpOutput + lpAlpha * (input - lpOutput);
+  return lpOutput;
+}
+
+// Simple notch filter for 50/60Hz powerline noise
+float notchFilter(float input) {
+  float output = notch_b0 * input + notch_b0 * notch_a1 * notchX1
+                 + notch_b0 * notchX2 - notch_a1 * notchY1 - notch_a2 * notchY2;
+  notchX2 = notchX1;
+  notchX1 = input;
+  notchY2 = notchY1;
+  notchY1 = output;
+  return output;
+}
+
+// Full filter pipeline
+float filterECG(float rawValue) {
+  float filtered;
+  filtered = highPassFilter(rawValue);     // Remove baseline drift
+  filtered = notchFilter(filtered);        // Remove 50/60Hz noise
+  filtered = lowPassFilter(filtered);      // Remove high-freq noise
+  filtered = movingAverage(filtered);      // Final smoothing
+  return filtered;
+}
+
+//////////////////////////////////////////////////////
+// PEAK DETECTION (for BPM)
+//////////////////////////////////////////////////////
+
+void detectPeak(float filteredValue) {
+  // Adaptive threshold
+  if (filteredValue > signalMax) signalMax = filteredValue;
+  if (filteredValue < signalMin) signalMin = filteredValue;
+
+  // Slowly adapt the threshold
+  peakAdaptive = peakAdaptive * 0.995 + signalMax * 0.005;
+  peakThreshold = peakAdaptive * 0.6;
+
+  // Decay min/max slowly
+  signalMax *= 0.999;
+  signalMin *= 1.001;
+
+  if (peakCooldown > 0) {
+    peakCooldown--;
+    return;
+  }
+
+  if (filteredValue > peakThreshold && !peakDetected) {
+    peakDetected = true;
+    unsigned long now = millis();
+
+    if (lastPeakTime > 0) {
+      unsigned long interval = now - lastPeakTime;
+      if (interval > 300 && interval < 2000) {  // 30-200 BPM range
+        int instantBpm = 60000 / interval;
+
+        bpmBuffer[bpmIdx] = instantBpm;
+        bpmIdx = (bpmIdx + 1) % BPM_BUFFER_SIZE;
+        if (!bpmReady && bpmIdx == 0) bpmReady = true;
+
+        int count = bpmReady ? BPM_BUFFER_SIZE : bpmIdx;
+        if (count > 0) {
+          int sum = 0;
+          for (int i = 0; i < count; i++) sum += bpmBuffer[i];
+          bpm = sum / count;
+        }
+      }
+    }
+    lastPeakTime = now;
+    peakCooldown = 40;  // ~200ms at 200Hz, prevents double detection
+  }
+
+  if (filteredValue < peakThreshold * 0.4) {
+    peakDetected = false;
+  }
+}
+
+//////////////////////////////////////////////////////
+// DISPLAY FUNCTIONS
+//////////////////////////////////////////////////////
+
+void drawHeader(bool leadsOff) {
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.print("ECG");
+
+  // Heart icon when beat detected
+  if (bpm > 0 && !leadsOff) {
+    display.setCursor(25, 0);
+    display.print("\x03");  // heart character
+  }
+
+  // BPM display
+  display.setCursor(70, 0);
+  if (leadsOff) {
+    display.print("--- BPM");
+  } else if (bpm > 0) {
+    display.print(bpm);
+    display.print(" BPM");
+  } else {
+    display.print("... BPM");
+  }
+
+  // Separator line
+  display.drawLine(0, 10, 127, 10, WHITE);
+
+  // Draw border for waveform area
+  display.drawLine(0, WAVE_BOTTOM + 1, 127, WAVE_BOTTOM + 1, WHITE);
+}
+
+void drawLeadsOffScreen() {
+  display.clearDisplay();
+  drawHeader(true);
+
+  display.setTextSize(1);
+  display.setCursor(15, 22);
+  display.println("LEADS OFF!");
+  display.setCursor(5, 36);
+  display.println("Check electrode");
+  display.setCursor(5, 48);
+  display.println("connections...");
+  display.display();
+}
+
+void drawWaveform() {
+  // Draw connected lines between consecutive points
+  for (int i = 1; i < WAVE_WIDTH; i++) {
+    int idx1 = i - 1;
+    int idx2 = i;
+    
+    // Constrain to waveform area
+    int y1 = constrain(waveBuffer[idx1], WAVE_TOP, WAVE_BOTTOM);
+    int y2 = constrain(waveBuffer[idx2], WAVE_TOP, WAVE_BOTTOM);
+
+    display.drawLine(idx1, y1, idx2, y2, WHITE);
+  }
+}
+
+//////////////////////////////////////////////////////
+// MAIN LOOP
+//////////////////////////////////////////////////////
+
+void loop() {
+  unsigned long now = millis();
+
+  // --- SAMPLE ECG at 200Hz ---
+  if (now - lastSampleTime >= SAMPLE_INTERVAL) {
+    lastSampleTime = now;
+
+    // Check leads-off detection
+    bool leadsOff = (digitalRead(LO_PLUS) == 1) || (digitalRead(LO_MINUS) == 1);
+
+    if (leadsOff) {
+      // Show leads-off message on display
+      if (now - lastDisplayTime >= 500) {
+        lastDisplayTime = now;
+        drawLeadsOffScreen();
+      }
+      // Reset filters
+      hpOutput = 0;
+      lpOutput = 0;
+      prevRaw = 0;
+      return;
+    }
+
+    // Read raw ECG value (12-bit ADC: 0-4095)
+    int rawValue = analogRead(ECG_PIN);
+
+    // Apply full filter chain
+    float filtered = filterECG((float)rawValue);
+
+    // Detect peaks for BPM
+    detectPeak(filtered);
+
+    // Map filtered value to waveform Y position
+    // Center around baseline, scale to fit display
+    float displayValue = filtered;
+
+    // Auto-scaling: track range and scale accordingly
+    static float dispMin = -200, dispMax = 200;
+    
+    // Slowly adapt display range
+    if (displayValue < dispMin) dispMin = displayValue;
+    if (displayValue > dispMax) dispMax = displayValue;
+    dispMin *= 0.999;
+    dispMax *= 0.999;
+    
+    // Ensure minimum range to avoid division by zero
+    float range = dispMax - dispMin;
+    if (range < 50) range = 50;
+    
+    // Map to pixel Y (inverted: higher value = higher on screen)
+    int pixelY = WAVE_BOTTOM - (int)(((displayValue - dispMin) / range) * WAVE_HEIGHT);
+    pixelY = constrain(pixelY, WAVE_TOP, WAVE_BOTTOM);
+
+    // Shift waveform buffer left and add new point
+    for (int i = 0; i < WAVE_WIDTH - 1; i++) {
+      waveBuffer[i] = waveBuffer[i + 1];
+    }
+    waveBuffer[WAVE_WIDTH - 1] = pixelY;
+
+    // Serial output for debugging / plotting
+    Serial.print("Raw:");
+    Serial.print(rawValue);
+    Serial.print(",Filtered:");
+    Serial.print((int)filtered);
+    Serial.print(",BPM:");
+    Serial.println(bpm);
+  }
+
+  // --- UPDATE DISPLAY at ~30 FPS ---
+  if (now - lastDisplayTime >= DISPLAY_INTERVAL) {
+    lastDisplayTime = now;
+
+    display.clearDisplay();
+    drawHeader(false);
+    drawWaveform();
+    display.display();
+  }
+}
