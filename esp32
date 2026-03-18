@@ -8,16 +8,16 @@
 #include <ArduinoJson.h>
 
 //////////////// WIFI //////////////////
-const char* ssid = "Rohan";
+const char* ssid = "RHN";
 const char* password = "Rohan123";
 
-// Toggle between LOCAL and CLOUD
-#define USE_CLOUD true  
+const char* localURL = "http://10.28.194.118:5000/predict";
+const char* cloudURL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com/predict";
 
-String localURL = "http://10.28.194.118:5000/predict";
-String cloudURL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com/predict";
-
-String serverURL = USE_CLOUD ? cloudURL : localURL;
+int lastLocalCode = 0;
+int lastCloudCode = 0;
+String localError = "";
+String cloudError = "";
 
 //////////////// OLED //////////////////
 #define SCREEN_WIDTH 128
@@ -36,6 +36,15 @@ String currentDisplayMode = "STRESS";
 bool isSensorActive = true;
 int lastHttpCode = 0;
 String lastError = "";
+
+//////////////// NOISE FILTER //////////////
+#define MA_SIZE 8
+long maBuffer[MA_SIZE];
+int maIdx = 0;
+long maSum = 0;
+
+float lpAlpha = 0.15; // Low pass filter coefficient
+float lpIR = 0;
 
 long lastBeatTime = 0;
 long prevRR = 0;
@@ -102,22 +111,58 @@ void connectWiFi() {
   delay(1000);
 }
 
-void sendToServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
+void sendToEndpoint(const char* url, String& body, bool isCloud) {
   WiFiClientSecure *client = nullptr;
   HTTPClient http;
-  http.setTimeout(25000); // 25s for Render
+  
+  http.setTimeout(isCloud ? 15000 : 5000); 
 
-  if (serverURL.startsWith("https")) {
+  if (isCloud) {
     client = new WiFiClientSecure;
     client->setInsecure();
-    http.begin(*client, serverURL);
+    http.begin(*client, url);
   } else {
-    http.begin(serverURL);
+    http.begin(url);
   }
 
   http.addHeader("Content-Type", "application/json");
+  Serial.print("Sending to: "); Serial.println(url);
+  
+  int code = http.POST(body);
+  if (isCloud) lastCloudCode = code; else lastLocalCode = code;
+  
+  if (code > 0) {
+    if (isCloud) cloudError = "OK"; else localError = "OK";
+    String payload = http.getString();
+    Serial.print("Code: "); Serial.println(code);
+    
+    StaticJsonDocument<512> recvDoc;
+    if (!deserializeJson(recvDoc, payload)) {
+      if (recvDoc.containsKey("stress")) stressLevel = recvDoc["stress"].as<String>();
+      if (recvDoc.containsKey("warning")) warningMsg = recvDoc["warning"].as<String>();
+      if (recvDoc.containsKey("send_interval")) sendInterval = recvDoc["send_interval"].as<int>();
+      if (recvDoc.containsKey("display_mode")) currentDisplayMode = recvDoc["display_mode"].as<String>();
+      if (recvDoc.containsKey("is_sensor_active")) isSensorActive = recvDoc["is_sensor_active"].as<bool>();
+      
+      if (recvDoc["recalibrate"] == true) {
+        Serial.println("Recalibration requested");
+        bpmReady = false; bpmIndex = 0; hrvReady = false; hrvIndex = 0;
+        bpm = 0; hrv = 0;
+        setupSensor();
+      }
+    }
+  } else {
+    String err = http.errorToString(code);
+    if (isCloud) cloudError = err; else localError = err;
+    Serial.print("Error: "); Serial.println(err);
+  }
+  
+  http.end();
+  if (client) delete client;
+}
+
+void sendToServer() {
+  if (WiFi.status() != WL_CONNECTED) return;
 
   StaticJsonDocument<200> doc;
   if (fingerDetected && bpm > 0) {
@@ -135,40 +180,8 @@ void sendToServer() {
   String body;
   serializeJson(doc, body);
 
-  Serial.print("Sending to: "); Serial.println(serverURL);
-  int code = http.POST(body);
-  lastHttpCode = code;
-  
-  if (code > 0) {
-    lastError = "OK";
-    String payload = http.getString();
-    Serial.print("HTTP Code: "); Serial.println(code);
-    Serial.println("Response: " + payload);
-    
-    StaticJsonDocument<512> recvDoc;
-    if (!deserializeJson(recvDoc, payload)) {
-      if (recvDoc.containsKey("stress")) stressLevel = recvDoc["stress"].as<String>();
-      if (recvDoc.containsKey("warning")) warningMsg = recvDoc["warning"].as<String>();
-      if (recvDoc.containsKey("send_interval")) sendInterval = recvDoc["send_interval"].as<int>();
-      if (recvDoc.containsKey("display_mode")) currentDisplayMode = recvDoc["display_mode"].as<String>();
-      if (recvDoc.containsKey("is_sensor_active")) isSensorActive = recvDoc["is_sensor_active"].as<bool>();
-      
-      if (recvDoc["recalibrate"] == true) {
-        Serial.println("Recalibrating...");
-        bpmReady = false; bpmIndex = 0; hrvReady = false; hrvIndex = 0;
-        bpm = 0; hrv = 0;
-        setupSensor();
-      }
-    }
-  } else {
-    lastError = http.errorToString(code);
-    Serial.print("HTTP Error: "); Serial.println(lastError);
-  }
-  
-  http.end();
-  if (client) {
-    delete client; // Free heap memory
-  }
+  sendToEndpoint(localURL, body, false);
+  sendToEndpoint(cloudURL, body, true);
 }
 
 void calculateHRV(long rr) {
@@ -196,19 +209,34 @@ void calculateHRV(long rr) {
   prevRR = rr;
 }
 
-void readSensor() {
-  // Always sample - do not stop based on server flag to prevent "turned off" state
-  long irValue = sensor.getIR();
-  Serial.print("IR: "); Serial.println(irValue);
+long filterIR(long raw) {
+  // Moving Average
+  maSum -= maBuffer[maIdx];
+  maBuffer[maIdx] = raw;
+  maSum += raw;
+  maIdx = (maIdx + 1) % MA_SIZE;
+  long maOut = maSum / MA_SIZE;
+  
+  // IIR Low Pass
+  lpIR = lpIR + lpAlpha * (maOut - lpIR);
+  return (long)lpIR;
+}
 
-  if (irValue < 5000) { // Lowered threshold for weak signals
+void readSensor() {
+  long rawIR = sensor.getIR();
+  
+  if (rawIR < 5000) { 
     fingerDetected = false;
+    bpm = 0; hrv = 0;
     return;
   }
-
   fingerDetected = true;
 
-  if (checkForBeat(irValue)) {
+  // Apply Filter to reduce noise before beat detection
+  long irValue = filterIR(rawIR);
+  Serial.print("Raw:"); Serial.print(rawIR); Serial.print(" Filtered:"); Serial.println(irValue);
+
+  if (checkForBeat(irValue)) { // Detect beat on filtered signal
     long currentTime = millis();
     long rr = currentTime - lastBeatTime;
     lastBeatTime = currentTime;
@@ -250,9 +278,14 @@ void updateDisplay() {
     display.setCursor(0, 15);
     display.print("BPM: "); display.setTextSize(2); display.print((int)bpm);
     display.setTextSize(1); display.print("   HRV: "); display.setTextSize(2); display.println((int)hrv);
+    
     display.setTextSize(1);
-    display.setCursor(0, 38);
-    display.print("STRESS: "); display.setTextSize(2); display.println(stressLevel);
+    display.setCursor(0, 36);
+    display.print("SpO2: "); display.print("98%"); // Placeholder for local display
+    display.print("  RESP: "); display.println("16");
+    
+    display.setCursor(0, 48);
+    display.print("STRESS: "); display.setTextSize(1); display.println(stressLevel);
   } 
   else if (currentDisplayMode == "BPM") {
     display.setCursor(0, 0);
@@ -282,8 +315,8 @@ void updateDisplay() {
     display.drawLine(0, 9, 128, 9, WHITE);
     display.setCursor(0, 15);
     display.print("WiFi: "); display.println(WiFi.status() == WL_CONNECTED ? "OK" : "ERR");
-    display.print("HTTP: "); display.println(lastHttpCode);
-    display.print("ERR: "); display.println(lastError);
+    display.print("L: "); display.print(lastLocalCode); display.print(" "); display.println(localError.substring(0, 10));
+    display.print("C: "); display.print(lastCloudCode); display.print(" "); display.println(cloudError.substring(0, 10));
   }
 
   // Footer / Timer (Always show small at the bottom)
@@ -291,11 +324,12 @@ void updateDisplay() {
   if (timeLeft < 0) timeLeft = 0;
   display.setTextSize(1);
   display.setCursor(0, 56);
-  if (lastHttpCode != 200 && lastHttpCode != 0) {
-    display.print("Net Err: "); display.print(lastHttpCode);
-  }
-  else {
-    display.print("Sync in: "); display.print(timeLeft); display.print("s");
+  if (lastLocalCode != 200 && lastLocalCode != 0) {
+    display.print("L_Err: "); display.print(lastLocalCode);
+  } else if (lastCloudCode != 200 && lastCloudCode != 0) {
+    display.print("C_Err: "); display.print(lastCloudCode);
+  } else {
+    display.print("Synced: "); display.print(timeLeft); display.print("s");
   }
   display.display();
 }

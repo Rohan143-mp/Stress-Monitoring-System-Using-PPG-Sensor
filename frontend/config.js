@@ -1,7 +1,8 @@
 // Centralized configuration for the API URL
-// Toggle between LOCAL and CLOUD mode
+// The ESP32 now sends data to BOTH local and cloud simultaneously.
+// Toggle USE_CLOUD to choose which backend this frontend app displays data from.
 
-const USE_CLOUD = true;
+const USE_CLOUD = false;
 
 const LOCAL_IP = "10.28.194.118";
 const RENDER_URL = "https://stress-monitoring-system-using-ppg-sensor.onrender.com";

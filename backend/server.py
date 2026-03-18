@@ -3,6 +3,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
 import numpy as np
+import pandas as pd
 import os
 import time
 
@@ -94,11 +95,13 @@ def predict():
     stress_index = bpm / hrv if hrv != 0 else 0
     spo2_dev = 100 - spo2
 
-    X = np.array([[bpm, resp, spo2, hrv, stress_index, spo2_dev]])
-    X = scaler.transform(X)
+    # Define feature names as they were used during training
+    feature_names = ["bpm", "respiration", "spo2", "hrv", "stress_index", "spo2_dev"]
+    X = pd.DataFrame([[bpm, resp, spo2, hrv, stress_index, spo2_dev]], columns=feature_names)
+    X_scaled = scaler.transform(X)
 
-    rf_pred = rf_model.predict(X)
-    xgb_pred = xgb_model.predict(X)
+    rf_pred = rf_model.predict(X_scaled)
+    xgb_pred = xgb_model.predict(X_scaled)
 
     final_pred = int(round((rf_pred[0] + xgb_pred[0]) / 2))
     
