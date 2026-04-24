@@ -1,0 +1,374 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Wire.h>
+#include "MAX30105.h"
+#include "heartRate.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ArduinoJson.h>
+
+//////////////// WIFI //////////////////
+const char* ssid = "Rohan";
+const char* password = "Rohan123";
+
+String serverURL = "http://10.121.7.118:5000/predict";
+
+//////////////// OLED //////////////////
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//////////////// MAX30102 //////////////////
+MAX30105 particleSensor;
+
+long lastBeat = 0;
+float bpm = 0;
+long hrv = 0;        // Now represents RMSSD
+long prevRR = 0;
+bool fingerDetected = false;
+
+// HRV Stability: RMSSD Window
+const byte HRV_SIZE = 10;
+long rrDiffsSq[HRV_SIZE];
+byte hrvSpot = 0;
+bool hrvBufferFull = false;
+
+// Moving Average for BPM - Increased to 10 for better stability
+const byte RATE_SIZE = 10; 
+byte rates[RATE_SIZE]; 
+byte rateSpot = 0;
+float lastValidBpm = 0;
+
+String stress = "Idle";
+String warningMsg = "Place finger on sensor";
+String displayMode = "STRESS"; 
+bool isSensorActive = true; 
+int sendInterval = 10000; // Updated default to 10s
+
+unsigned long lastCycleStart = 0;
+int samplingWindow = 8000; // Sample for 8 seconds before sending (for 10s interval)
+
+enum DeviceState { IDLE, SAMPLING, SENDING };
+DeviceState currentState = SAMPLING;
+
+///////////////////////////////////////////////////
+
+void connectWiFi() {
+  WiFi.begin(ssid, password);
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 10);
+  display.println("Connecting WiFi...");
+  display.display();
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  display.clearDisplay();
+  display.setCursor(0, 10);
+  display.println("WiFi Connected!");
+  display.println(WiFi.localIP());
+  display.display();
+  delay(1500);
+}
+
+///////////////////////////////////////////////////
+
+void sendDataToServer() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverURL);
+    http.addHeader("Content-Type", "application/json");
+
+    StaticJsonDocument<200> sendDoc;
+    // Only send non-zero data if finger is detected and sensor is active
+    if (isSensorActive && fingerDetected && bpm > 0) {
+      sendDoc["bpm"] = (int)bpm;
+      sendDoc["respiration"] = 16; // Baseline
+      sendDoc["spo2"] = 98;        // Baseline
+      sendDoc["hrv"] = (int)hrv;
+    } else {
+      sendDoc["bpm"] = 0;
+      sendDoc["respiration"] = 0;
+      sendDoc["spo2"] = 0;
+      sendDoc["hrv"] = 0;
+    }
+
+    String jsonData;
+    serializeJson(sendDoc, jsonData);
+
+    int httpResponseCode = http.POST(jsonData);
+
+    if (httpResponseCode > 0) {
+      String payload = http.getString();
+      StaticJsonDocument<512> recvDoc;
+      deserializeJson(recvDoc, payload);
+
+      stress = recvDoc["stress"].as<String>();
+      warningMsg = recvDoc["warning"].as<String>();
+      
+      if (recvDoc.containsKey("display_mode")) {
+        displayMode = recvDoc["display_mode"].as<String>();
+      }
+      if (recvDoc.containsKey("is_sensor_active")) {
+        isSensorActive = recvDoc["is_sensor_active"].as<bool>();
+      }
+      if (recvDoc.containsKey("send_interval")) {
+        int newInterval = recvDoc["send_interval"].as<int>();
+        if (newInterval != sendInterval) {
+           sendInterval = newInterval;
+           // Dynamic sampling window: leave 2 seconds for sending/processing
+           samplingWindow = sendInterval - 2000; 
+           if (samplingWindow < 2000) samplingWindow = 2000;
+           
+           lastCycleStart = millis();
+           currentState = SAMPLING;
+        }
+      }
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+    }
+    http.end();
+  }
+}
+
+///////////////////////////////////////////////////
+
+void renderFooter() {
+  unsigned long elapsed = millis() - lastCycleStart;
+  int timeLeft = (int)(sendInterval - elapsed) / 1000;
+  if (timeLeft < 0) timeLeft = 0;
+
+  display.setTextSize(1);
+  display.setCursor(0, 56);
+  if (!fingerDetected) {
+     display.print("PLEASE PLACE FINGER");
+  } else {
+    if (currentState == IDLE) {
+      display.print("Next sync: "); display.print(timeLeft); display.print("s");
+    } else if (currentState == SAMPLING) {
+      display.print("SAMPLING... "); display.print(timeLeft); display.print("s");
+    }
+  }
+}
+
+void renderPaused() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("MONITORING PAUSED");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  display.setTextSize(2);
+  display.setCursor(15, 30);
+  display.println("STANDBY");
+}
+
+void renderStress() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("STRESS LEVEL");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  display.setTextSize(2);
+  display.setCursor(0, 20);
+  display.print(stress);
+
+  display.setTextSize(1);
+  display.setCursor(0, 45);
+  display.print("BPM:"); display.print((int)bpm);
+  display.print(" HRV:"); display.print((int)hrv);
+}
+
+void renderBPM() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("HEART RATE");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  display.setTextSize(3);
+  display.setCursor(10, 25);
+  display.print((int)bpm);
+  display.setTextSize(1);
+  display.print(" BPM");
+}
+
+void renderSpO2() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("OXYGEN (SpO2)");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  display.setTextSize(3);
+  display.setCursor(10, 25);
+  display.print("98"); 
+  display.setTextSize(1);
+  display.print(" %");
+}
+
+void renderClock() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("SYSTEM STATUS");
+  display.drawLine(0, 10, 128, 10, WHITE);
+
+  display.setTextSize(2);
+  display.setCursor(20, 25);
+  display.println("ONLINE");
+  
+  display.setTextSize(1);
+  display.setCursor(0, 45);
+  display.print("IP: "); display.print(WiFi.localIP());
+}
+
+void updateDisplay() {
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+
+  if (!isSensorActive) {
+    renderPaused();
+  } else {
+    if (displayMode == "STRESS") renderStress();
+    else if (displayMode == "BPM") renderBPM();
+    else if (displayMode == "SPO2") renderSpO2();
+    else if (displayMode == "IDLE") renderClock();
+    else renderStress(); 
+
+    renderFooter();
+  }
+
+  display.display();
+}
+
+///////////////////////////////////////////////////
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    for (;;);
+  }
+  
+  display.clearDisplay();
+  connectWiFi();
+
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    display.clearDisplay();
+    display.println("MAX30105 ERROR");
+    display.display();
+    while (1);
+  }
+
+  // Optimized settings for Accuracy
+  byte ledBrightness = 60; // Options: 0=Off to 255=50mA
+  byte sampleAverage = 4; // Options: 1, 2, 4, 8, 16, 32
+  byte ledMode = 2; // Options: 1 = Red only, 2 = Red + IR, 3 = Red + IR + Green
+  int sampleRate = 100; // Options: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int pulseWidth = 411; // Options: 69, 118, 215, 411
+  int adcRange = 4096; // Options: 2048, 4096, 8192, 16384
+
+  particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+  
+  lastCycleStart = millis();
+}
+
+void loop() {
+  static unsigned long lastCmdCheck = 0;
+  // Heartbeat/Sync check every 5 seconds
+  if (millis() - lastCmdCheck > 5000) {
+     lastCmdCheck = millis();
+     // Only send heartbeat if we are not currently in the middle of a sampling/sending cycle
+     if (currentState == IDLE) sendDataToServer();
+  }
+
+  if (!isSensorActive) {
+    updateDisplay();
+    delay(10);
+    return;
+  }
+
+  unsigned long elapsed = millis() - lastCycleStart;
+
+  // READ SENSOR - Threshold for finger detection
+  long irValue = particleSensor.getIR();
+  
+  if (irValue < 30000) { // Re-adjusted threshold for reliable finger detection
+    fingerDetected = false;
+    bpm = 0;
+    hrv = 0;
+  } else {
+    fingerDetected = true;
+    if (checkForBeat(irValue)) {
+      long currentBeat = millis();
+      long rr = currentBeat - lastBeat;
+      lastBeat = currentBeat;
+
+      float currentBpm = 60 / (rr / 1000.0);
+      
+      // Strict BPM limits and outlier rejection
+      if (currentBpm < 150 && currentBpm > 40) {
+        // Simple stability check: don't allow >25% change from last valid BPM to avoid noise
+        if (lastValidBpm == 0 || abs(currentBpm - lastValidBpm) < (lastValidBpm * 0.25)) {
+          rates[rateSpot++] = (byte)currentBpm;
+          rateSpot %= RATE_SIZE;
+
+          int avgBpm = 0;
+          for (byte x = 0 ; x < RATE_SIZE ; x++) avgBpm += rates[x];
+          avgBpm /= RATE_SIZE;
+
+          // Update BPM and HRV in real-time for display and sync
+          bpm = (float)avgBpm;
+          
+          // --- Improved HRV (RMSSD) Logic (always running) ---
+          if (prevRR > 0) {
+            long diff = abs(rr - prevRR);
+            
+            // Filter unrealistic jumps (e.g. noise spikes > 200ms)
+            if (diff < 200) {
+              rrDiffsSq[hrvSpot++] = diff * diff;
+              if (hrvSpot >= HRV_SIZE) {
+                hrvSpot = 0;
+                hrvBufferFull = true;
+              }
+
+              // Calculate RMSSD from the buffer
+              long sumSq = 0;
+              byte count = hrvBufferFull ? HRV_SIZE : hrvSpot;
+              if (count > 0) {
+                for (byte x = 0; x < count; x++) sumSq += rrDiffsSq[x];
+                hrv = sqrt(sumSq / count);
+              }
+            }
+          }
+          prevRR = rr;
+          lastValidBpm = (float)avgBpm;
+        }
+      }
+    }
+  }
+
+  // State Machine logic for Intervals
+  if (currentState == IDLE) {
+    if (elapsed + 2000 >= sendInterval) { // Start sampling 2s before interval
+       currentState = SAMPLING;
+    }
+  } 
+  else if (currentState == SAMPLING) {
+    if (elapsed >= sendInterval) {
+       currentState = SENDING;
+    }
+  }
+
+  if (currentState == SENDING) {
+    sendDataToServer();
+    currentState = IDLE;
+    lastCycleStart = millis();
+  }
+
+  updateDisplay();
+}

@@ -1,0 +1,69 @@
+# Node.js
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.expo/
+
+# Frontend specific
+frontend/node_modules/
+frontend/dist/
+frontend/.expo/
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+backend/.venv/
+backend/__pycache__/
+
+# Arduino / ESP32
+esp32/build/
+esp32/bin/
+*.hex
+*.bin
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Project specific
+ui_reference/
+brain/
+output/
+hard code/
+
+# Secrets
+backend/firebase_credentials.json
+
+# Ensure models are NOT ignored
+!models/
+!backend/models/
+!*.pkl
+!*.joblib
+!*.h5
+!*.keras

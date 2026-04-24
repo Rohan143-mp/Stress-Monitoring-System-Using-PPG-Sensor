@@ -1,0 +1,90 @@
+﻿python.exe : F:\Information 
+Technology\College\SEm6\Mini\stress monitoring syst
+em\.venv\Lib\site-packages\sklearn\base.py:463: 
+InconsistentVersionWarning: Trying to unpickle 
+estimator DecisionTreeClassifier from version 
+1.6.1 when using version 1.8.0. This might lead to 
+breaking code or invalid results. Use at your own 
+risk. For more info please refer to:
+At line:1 char:1
++ & "f:/Information 
+Technology/College/SEm6/Mini/stress monitoring 
+syst ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (F:\In 
+   formation ...lease refer to::String) [], Remot  
+  eException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+https://scikit-learn.org/stable/model_persistence.h
+tml#security-maintainability-limitations
+  warnings.warn(
+F:\Information Technology\College\SEm6\Mini\stress 
+monitoring system\.venv\Lib\site-packages\sklearn\b
+ase.py:463: InconsistentVersionWarning: Trying to 
+unpickle estimator RandomForestClassifier from 
+version 1.6.1 when using version 1.8.0. This might 
+lead to breaking code or invalid results. Use at 
+your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.h
+tml#security-maintainability-limitations
+  warnings.warn(
+F:\Information Technology\College\SEm6\Mini\stress 
+monitoring system\.venv\Lib\site-packages\sklearn\b
+ase.py:463: InconsistentVersionWarning: Trying to 
+unpickle estimator StandardScaler from version 
+1.6.1 when using version 1.8.0. This might lead to 
+breaking code or invalid results. Use at your own 
+risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.h
+tml#security-maintainability-limitations
+  warnings.warn(
+F:\Information Technology\College\SEm6\Mini\stress 
+monitoring system\.venv\Lib\site-packages\sklearn\b
+ase.py:463: InconsistentVersionWarning: Trying to 
+unpickle estimator LabelEncoder from version 1.6.1 
+when using version 1.8.0. This might lead to 
+breaking code or invalid results. Use at your own 
+risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.h
+tml#security-maintainability-limitations
+  warnings.warn(
+F:\Information Technology\College\SEm6\Mini\stress 
+monitoring system\.venv\Lib\site-packages\sklearn\u
+tils\validation.py:2684: UserWarning: X has 
+feature names, but StandardScaler was fitted 
+without feature names
+  warnings.warn(
+Classes: ['interruption' 'no stress' 'time pressure']
+Scaler mean: [ 14.977498   109.3525313    0.86600124 115.97720016]
+Scaler scale: [  4.12076058  77.1169201    0.99018756 360.85464047]
+Feature names expected: ['RMSSD', 'SDRR', 'pNN50', 'LF_HF']
+
+============================================================
+Testing with values near scaler training center:
+  Scaler means: RMSSD=14.98, SDRR=109.35, pNN50=0.87, LF_HF=115.98
+
+[RELAXED]
+  Raw:    RMSSD=55.2, SDNN=48.3, pNN50=22.1, LF/HF=0.8
+  Scaled: [ 9.76094126 -0.79168788 21.44442088 -0.31917894]
+  RF  probs: {'interruption': np.float64(0.57), 'no stress': np.float64(0.43), 'time pressure': np.float64(0.0)}
+  XGB probs: {'interruption': np.float32(0.131), 'no stress': np.float32(0.864), 'time pressure': np.float32(0.005)}
+  Avg probs: {'interruption': np.float64(0.351), 'no stress': np.float64(0.647), 'time pressure': np.float64(0.002)}
+Traceback (most recent call last):
+  File "f:\Information 
+Technology\College\SEm6\Mini\stress monitoring 
+system\backend\diagnose_model.py", line 57, in 
+<module>
+    print(f"  \u2192 Prediction: {pred_label} 
+({conf}%)")
+  File "C:\Users\DELL\AppData\Local\Programs\Python
+\Python312\Lib\encodings\cp1252.py", line 19, in 
+encode
+    return codecs.charmap_encode(input,self.errors,
+encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode 
+character '\u2192' in position 2: character maps 
+to <undefined>
