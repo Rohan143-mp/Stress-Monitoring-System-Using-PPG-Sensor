@@ -65,14 +65,25 @@ extremes = [
     {"label": "All high",     "rmssd": 200, "sdnn": 200, "pnn50": 100, "lf_hf": 10},
     {"label": "Mean values",  "rmssd": mean_test[0], "sdnn": mean_test[1], "pnn50": mean_test[2], "lf_hf": mean_test[3]},
 ]
+\
+
+#This version scales the data only once .   --8/jun/2026
 for tc in extremes:
-    label = tc["label"]
-    X = pd.DataFrame([[tc["rmssd"], tc["sdnn"], tc["pnn50"], tc["lf_hf"]]], columns=feature_names)
+    X = pd.DataFrame(
+        [[tc[f] for f in feature_names]],
+        columns=feature_names
+    )
+
     X_scaled = scaler.transform(X)
-    rf_proba  = rf_model.predict_proba(X_scaled)[0]
-    xgb_proba = xgb_model.predict_proba(X_scaled)[0]
-    avg_proba = (rf_proba + xgb_proba) / 2
-    final_enc = int(np.argmax(avg_proba))
-    pred_label = label_encoder.inverse_transform([final_enc])[0]
-    conf = round(float(np.max(avg_proba)) * 100, 2)
-    print(f"[{label}] → {pred_label} ({conf}%) | probs: {dict(zip(label_encoder.classes_, avg_proba.round(3)))}")
+
+    probs = (
+        rf_model.predict_proba(X_scaled)[0] +
+        xgb_model.predict_proba(X_scaled)[0]
+    ) / 2
+
+    print(
+        f"[{tc['label']}] → "
+        f"{label_encoder.inverse_transform([probs.argmax()])[0]} "
+        f"({probs.max() * 100:.2f}%) | "
+        f"{dict(zip(label_encoder.classes_, probs.round(3)))}"
+    )
