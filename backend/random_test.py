@@ -17,21 +17,22 @@ print("=" * 55)
 print("  Pushing 10 RANDOM sensor data entries to Firebase")
 print("=" * 55)
 
-for i in range(10):
+for i in range(1, 11):
     data = {
         "bpm": random.randint(60, 110),
-        "rmssd": round(random.uniform(5.0, 30.0), 2),
-        "sdnn": round(random.uniform(20.0, 150.0), 2),
-        "pnn50": round(random.uniform(0.1, 2.0), 2),
-        "lf_hf": round(random.uniform(0.1, 500.0), 2),
+        "rmssd": round(random.uniform(5, 30), 2),
+        "sdnn": round(random.uniform(20, 150), 2),
+        "pnn50": round(random.uniform(0.1, 2), 2),
+        "lf_hf": round(random.uniform(0.1, 500), 2),
         "spo2": random.randint(94, 99),
         "resp": random.randint(12, 24),
-        "timestamp": time.time()
+        "timestamp": time.time(),
     }
-    
-    print(f"[{i+1}/10] Pushing: BPM={data['bpm']}, RMSSD={data['rmssd']}, LF/HF={data['lf_hf']:.1f}")
+
+    print(f"[{i}/10] BPM={data['bpm']} | RMSSD={data['rmssd']} | LF/HF={data['lf_hf']:.1f}")
+
     sensor_ref.push(data)
-    time.sleep(2) # Push every 2 seconds
+    time.sleep(2)
 
 print("\nDone! All random inputs pushed.")
 print("=" * 55)
