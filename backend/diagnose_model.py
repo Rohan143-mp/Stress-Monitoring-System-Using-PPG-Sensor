@@ -34,28 +34,32 @@ mean_test = scaler.mean_
 print(f"  Scaler means: RMSSD={mean_test[0]:.2f}, SDRR={mean_test[1]:.2f}, pNN50={mean_test[2]:.2f}, LF_HF={mean_test[3]:.2f}")
 print()
 
+feature_names = ["RMSSD", "SDRR", "pNN50", "LF_HF"]
+
+
+#Optimized test cases loop ..  9 july 2026
 for tc in test_cases:
-    label = tc["label"]
-    feature_names = ["RMSSD", "SDRR", "pNN50", "LF_HF"]
-    X = pd.DataFrame([[tc["rmssd"], tc["sdnn"], tc["pnn50"], tc["lf_hf"]]], columns=feature_names)
+    X = pd.DataFrame(
+        [[tc[k] for k in ("rmssd", "sdnn", "pnn50", "lf_hf")]],
+        columns=feature_names
+    )
+
     X_scaled = scaler.transform(X)
-    
-    rf_proba  = rf_model.predict_proba(X_scaled)[0]
-    xgb_proba = xgb_model.predict_proba(X_scaled)[0]
-    avg_proba = (rf_proba + xgb_proba) / 2
-    
-    final_enc = int(np.argmax(avg_proba))
-    pred_label = label_encoder.inverse_transform([final_enc])[0]
-    conf = round(float(np.max(avg_proba)) * 100, 2)
-    
-    print(f"[{label}]")
-    print(f"  Raw:    RMSSD={tc['rmssd']}, SDNN={tc['sdnn']}, pNN50={tc['pnn50']}, LF/HF={tc['lf_hf']}")
+
+    rf_probs = rf_model.predict_proba(X_scaled)[0]
+    xgb_probs = xgb_model.predict_proba(X_scaled)[0]
+    avg_probs = (rf_probs + xgb_probs) / 2
+
+    pred = label_encoder.inverse_transform([avg_probs.argmax()])[0]
+    conf = avg_probs.max() * 100
+
+    print(f"[{tc['label']}]")
+    print(f"  Raw:    {tc}")
     print(f"  Scaled: {X_scaled[0]}")
-    print(f"  RF  probs: {dict(zip(label_encoder.classes_, rf_proba.round(3)))}")
-    print(f"  XGB probs: {dict(zip(label_encoder.classes_, xgb_proba.round(3)))}")
-    print(f"  Avg probs: {dict(zip(label_encoder.classes_, avg_proba.round(3)))}")
-    print(f"  → Prediction: {pred_label} ({conf}%)")
-    print()
+    print(f"  RF :    {dict(zip(label_encoder.classes_, rf_probs.round(3)))}")
+    print(f"  XGB:    {dict(zip(label_encoder.classes_, xgb_probs.round(3)))}")
+    print(f"  Avg:    {dict(zip(label_encoder.classes_, avg_probs.round(3)))}")
+    print(f"  → Prediction: {pred} ({conf:.2f}%)\n")
 
 # Try extreme values to see if model can predict other classes
 print("="*60)
