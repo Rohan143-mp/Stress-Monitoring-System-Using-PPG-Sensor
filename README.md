@@ -40,6 +40,7 @@ pip install flask joblib numpy scikit-learn xgboost
 python server.py
 ```
 
+
 ### 3. Frontend Setup
 ```bash
 cd frontend
